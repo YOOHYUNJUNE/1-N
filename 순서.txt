@@ -1,0 +1,227 @@
+comment 기능 : article_id로 관계설정 / 왜래키 (1:N) / 게시물이 없어질 때 댓글은?
+
+1. path: (comment's')차이
+
+
+django-admin startproject modelForm .
+python -m venv venv
+source venv/Scripts/activate
+pip install django
+django-admin startapp articles
+(앱의 이름은 항상 복수형)
+settings에서 APP에 "articles" ,  TEMPLATES에서 DIR에 BASE_DIR / 'templates'
+최상위폴더에 templates, base.html
+base.html에 {% block body %}   {% endblock %}
+
+@ models.py
+class Article(models.Model):
+    title = models.CharField(max_length=50)
+    content = models.TextField()
+
+class Comment(models.Model):
+    content = models.TextField()
+    article = models.ForeignKey(Article, on_delete=models.CASCADE)
+    # PK : 고유키 : article의 id
+    # FK : 왜래키 : article의 id로 연결하는 id (1:N)
+
+python manage.py makemigrations
+python manage.py migrate
+
+@ admin.py
+from .models import Article, Comment
+admin.site.register(Article)
+admin.site.register(Comment)
+
+python manage.py createsuperuser / python manage.py runserver 확인
+
+@ urls.py(board) / include / path('articles/', include('articles.urls')),
+@ urls.py(articles)생성, 
+from django.urls import path
+from . import views
+app_name = 'articles'
+urlpatterns = [    
+	path('', views.index, name='index'),  	
+	]
+
+@ views.py
+from .models import Article
+def index(request):
+    articles = Article.objects.all()
+    context = {
+        'articles': articles,
+    }
+    return render(requset, 'index.html', context)
+
+@ articles에 templates폴더에 indexl.html
+{% extends 'base.html' %}
+{% block body %}
+  {% for article in articles %}
+    <p>{{article.title}}</p>
+    <hr>
+  {% endfor %}
+{% endblock%}
+
+@ base.html
+<a href="{% url 'articles:index %}">HOME</a>
+    <a href="{% url 'articles:create %}">CREATE</a>
+
+@ urls.py 
+path('create/', views.create, name='create'),
+
+@ articles에 forms.py 생성
+from django import forms
+from .models import Article
+class ArticleForm(forms.ModelForm):
+    class Meta:
+        model = Article
+        fields = '__all__'
+
+@ views.py / from .forms import ArticleForm
+def create(request):
+    if request.method == 'POST':
+        pass
+    else:
+        form = ArticleForm()
+    # if, else 둘다 사용하는 context
+    context = {
+        'form': form,
+    }
+    return render(request, 'form.html', context) 
+# 'form.html': 'create.html'
+
+@ form.html
+{% extends 'base.html' %}
+{% block body %}
+  <form action="" method="POST">
+      {% csrf_token %}
+      {{form}}
+      <input type="submit">
+  </form>
+{% endblock %}
+
+@ views.py / redirect / pass부분 수정
+def create(request):
+    if request.method == 'POST':
+        form = ArticleForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('articles:index')
+
+@ index.html / <a href="{% url 'articles:detail' id=article.id %}">detail</a>
+
+@ urls.py / path('<int:id>/', views.detail, name='detail'),
+
+@ views.py
+def detail(request, id):
+    article = Article.objects.get(id=id)
+    context = {
+        'article': article,
+    }
+    return render(request, 'detail.html', context)
+
+@ detail.html
+{% extends 'base.html' %}
+{% block body %}
+  <h1>{{article.title}}</h1>
+  <p>{{article.content}}</p>
+  <hr>
+{% endblock %}
+
+@ forms.py / from .models import Article, Comment
+class CommentForm(forms.ModelForm):
+    class Meta:
+        model =Comment
+        fields = '__all__'
+
+@ views.py / from .forms import ArticleForm, CommentForm
+def detail(request, id):
+    article = Article.objects.get(id=id)
+    comment_form = CommentForm()
+    context = {
+        'article': article,
+        'comment_form': comment_form,
+    }
+    return render(request, 'detail.html', context)
+
+@ detail.html
+<hr>
+  <form action="" method="POST">
+    {% csrf_token %}
+    {{comment_form}}
+    <input type="submit">
+  </form>
+
+@ forms.py
+class CommentForm(forms.ModelForm):
+    class Meta:
+        model =Comment
+					### fields = '__all__'
+        exclude = ('article', )
+
+@ detail.html
+<form action="{% url 'articles:comment_create' article_id=article.id %}" method="POST">
+
+</form>
+
+@ urls.py
+path('<int:article_id>/comments/create/', views.comment_create, name='comment_create'),
+
+@ views.py
+def comment_create(request, article_id):
+    comment_form = CommentForm(request.POST)
+    if comment_form.is_valid():
+        comment = comment_form.save(commit=False)
+#	article = Article.objects.get(id=article_id)
+#	comment.article = article
+	comment.save()
+        return redirect('articles:detail', id=article_id)
+
+# 두 번째 방법 (id를 직접 입력)
+        comment.article_id = article_id
+
+(detail)
+from .models import Article, Comment
+####  comment_list = Comment.objects.filter(article=article)
+context = {
+        'article': article,
+        'comment_form': comment_form,
+###     'comment_list': comment_list,
+
+@ detail.html
+{% for comment in comment_list %}
+    <p>{{comment.content}}</p>
+  {% endfor %}
+
+@ views.py / (detail)
+ # 두 번째 방법
+    comment_list = article.comment_set.all()
+
+ # 세 번째 방법
+	#  comment_list = article.comment_set.all()
+	# 'comment_list': comment_list,
+	detail.html에서  {% for comment in article.comment_set.all %}
+
+detail.html
+ {% if not article.comment_set.all|length %}
+    <p>댓글이 없습니다.</p>
+  {% endif %}
+
+{% for comment in article.comment_set.all %}
+    <p>
+      {{comment.content}}
+      <a href="{% url 'articles:comment_delete' article_id=article.id id=comment.id %}">X</a>
+    </p>
+  {% endfor %}
+
+@ urls.py
+path('<int:article_id>/comment/<int:id>/delete/', views.comment_delete, name='comment_delete'),
+
+@ views.py
+def comment_delete(request, article_id, id):
+    comment = Comment.objects.get(id=id)
+    comment.delete()
+    return redirect('articles:detail', id=article_id)
+
+
+
+
